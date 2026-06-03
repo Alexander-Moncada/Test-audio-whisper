@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voz a Texto con Groq</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #101828, #1d2939, #344054);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      padding: 20px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 720px;
+      background: rgba(255, 255, 255, 0.09);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(14px);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 32px;
+      text-align: center;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #d0d5dd;
+      margin-bottom: 28px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    select {
+      width: 100%;
+      padding: 14px;
+      border-radius: 14px;
+      border: none;
+      outline: none;
+      font-size: 16px;
+      margin-bottom: 22px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    button {
+      flex: 1;
+      padding: 15px;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+    }
+
+    #btnGrabar {
+      background: #12b76a;
+      color: white;
+    }
+
+    #btnDetener {
+      background: #f04438;
+      color: white;
+    }
+
+    #btnDetener:disabled {
+      background: #667085;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .status {
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      margin-bottom: 20px;
+      color: #eaecf0;
+    }
+
+    audio {
+      width: 100%;
+      margin-bottom: 20px;
+    }
+
+    .result-box {
+      background: white;
+      color: #101828;
+      border-radius: 18px;
+      padding: 22px;
+      min-height: 120px;
+    }
+
+    .result-title {
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #344054;
+    }
+
+    #resultado {
+      font-size: 18px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h1>Voz a Texto con Groq</h1>
+    <p class="subtitle">
+      Selecciona un modelo, graba tu voz y transcribe el audio con Whisper.
+    </p>
+
+    <label for="modelo">Modelo de transcripción:</label>
+    <select id="modelo">
+      <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+      <option value="whisper-large-v3">whisper-large-v3</option>
+    </select>
+
+    <div class="buttons">
+      <button id="btnGrabar">🎙️ Grabar</button>
+      <button id="btnDetener" disabled>⏹️ Detener</button>
+    </div>
+
+    <div class="status" id="estado">
+      Estado: listo para grabar.
+    </div>
+
+    <audio id="audioPreview" controls></audio>
+
+    <div class="result-box">
+      <div class="result-title">Texto transcrito:</div>
+      <div id="resultado">Aquí aparecerá la transcripción...</div>
+    </div>
+  </div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+
+    const btnGrabar = document.getElementById("btnGrabar");
+    const btnDetener = document.getElementById("btnDetener");
+    const estado = document.getElementById("estado");
+    const resultado = document.getElementById("resultado");
+    const audioPreview = document.getElementById("audioPreview");
+    const modeloSelect = document.getElementById("modelo");
+
+    // Más adelante aquí pondremos la URL del backend.
+    const BACKEND_URL = "http://localhost:5000/transcribir";
+
+    btnGrabar.addEventListener("click", async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = event => {
+          audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+          const audioUrl = URL.createObjectURL(audioBlob);
+
+          audioPreview.src = audioUrl;
+
+          estado.textContent = "Estado: enviando audio a transcripción...";
+          resultado.textContent = "Transcribiendo...";
+
+          await enviarAudio(audioBlob);
+        };
+
+        mediaRecorder.start();
+
+        estado.textContent = "Estado: grabando...";
+        btnGrabar.disabled = true;
+        btnDetener.disabled = false;
+
+      } catch (error) {
+        estado.textContent = "Error: no se pudo acceder al micrófono.";
+        console.error(error);
+      }
+    });
+
+    btnDetener.addEventListener("click", () => {
+      mediaRecorder.stop();
+
+      btnGrabar.disabled = false;
+      btnDetener.disabled = true;
+
+      estado.textContent = "Estado: grabación detenida.";
+    });
+
+    async function enviarAudio(audioBlob) {
+      const modelo = modeloSelect.value;
+
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "grabacion.webm");
+      formData.append("modelo", modelo);
+
+      try {
+        const response = await fetch(BACKEND_URL, {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Error desconocido");
+        }
+
+        resultado.textContent = data.texto;
+        estado.textContent = "Estado: transcripción completada.";
+
+      } catch (error) {
+        resultado.textContent = "Error al transcribir el audio.";
+        estado.textContent = "Estado: error en la transcripción.";
+        console.error(error);
+      }
+    }
+  </script>
+</body>
+</html>
